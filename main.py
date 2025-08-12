@@ -1,24 +1,31 @@
-from fastapi import FastAPI, Request, status
-from fastapi.responses import RedirectResponse
-import re
-import hmac
-import time
-import yaml
 import asyncio
 import hashlib
+import hmac
 import logging
+import re
 import threading
+import time
 import urllib.parse
 from typing import Dict
+
+import yaml
+from fastapi import FastAPI, Request, status
+from fastapi.responses import RedirectResponse
+
+from log_config import custom_logging_middleware
 from rule_engine import compile_rule_expr, select_node
 
 RANGE_RE = re.compile(r"bytes=(\d+)-(\d*)")
 
-
 app = FastAPI()
+app.middleware("http")(custom_logging_middleware)
 
 config_lock = threading.Lock()
 config_path = "config.yaml"
+
+now_bandwidth_lock = threading.Lock()
+now_bandwidths = {}  # key: node_name, value: 当前上传带宽，单位Mbps
+
 
 # 配置信息实体类
 class Config:
@@ -28,13 +35,9 @@ class Config:
         self.target_nodes = []  # 多目标节点配置列表，元素为规则集字典，包含规则集信息和节点权重
         self.rules = []
 
+
 config = Config()
 
-# 新增节点当前上传带宽状态字典，线程安全
-now_bandwidth_lock = threading.Lock()
-now_bandwidths = {}  # key: node_name, value: 当前上传带宽，单位Mbps
-
-logging.basicConfig(level=logging.INFO)
 
 
 
@@ -145,8 +148,6 @@ async def verify_minio_signature(request: Request) -> bool:
         return False
 
 
-
-
 def resign_request(request: Request) -> str:
     """重新签名请求"""
     query = dict(request.query_params)
@@ -185,10 +186,10 @@ def resign_request(request: Request) -> str:
         logging.error("未能选择到目标节点")
         return ""
 
-    access_key = selected_node.get("access_key","")
-    secret_key = selected_node.get("secret_key","")
-    region = selected_node.get("region","")
-    endpoint = selected_node.get("endpoint","")
+    access_key = selected_node.get("access_key", "")
+    secret_key = selected_node.get("secret_key", "")
+    region = selected_node.get("region", "")
+    endpoint = selected_node.get("endpoint", "")
 
     # ak sk region为空则直接返回未签名的链接
     if not access_key or not secret_key or not region:
@@ -255,7 +256,8 @@ def load_config():
         raw_rules = cfg.get("rules", {})
         rules_use = cfg.get("rules_use", None)  # 新增rules_use字段读取
 
-        enabled_nodes = {name: info for name, info in raw_nodes.items() if info.get("enabled", True) and info.get("endpoint")}
+        enabled_nodes = {name: info for name, info in raw_nodes.items() if
+                         info.get("enabled", True) and info.get("endpoint")}
 
         # 初始化当前上传带宽为0
         with now_bandwidth_lock:
@@ -267,11 +269,11 @@ def load_config():
             # 如果rules_use存在且rule_name不在其中，则跳过该规则
             if rules_use is not None and rule_name not in rules_use:
                 continue
-    
+
             # 允许rule_name为空字符串，表示匹配全部请求
             if rule_name is None:
                 rule_name = ""
-    
+
             mode = rule_entry.get("mode", "and") or "and"
             rules_exprs = rule_entry.get("rules", [])
             use_list = rule_entry.get("use", [])
@@ -285,7 +287,7 @@ def load_config():
             except Exception as e:
                 logging.warning(f"规则表达式预编译失败，规则集 {rule_name}，错误: {e}")
                 compiled_rule_funcs = []
-    
+
             node_weights = {}
             for item in use_list:
                 parts = item.split()
@@ -301,7 +303,7 @@ def load_config():
                         logging.warning(f"use中权重解析失败: {item}，错误: {e}")
                 else:
                     logging.warning(f"use格式错误: {item}")
-    
+
             compiled_rule_sets.append({
                 "rule_name": rule_name,
                 "mode": mode,
@@ -322,6 +324,7 @@ def load_config():
     except Exception as e:
         logging.error(f"加载配置文件失败: {e}")
 
+
 # load_config()
 
 @app.get("/reload-config")
@@ -332,6 +335,7 @@ async def reload_config():
         return {"message": "配置文件重载成功"}
     except Exception as e:
         return {"error": f"配置文件重载失败: {e}"}
+
 
 # 新增接口，节点上报当前上传带宽，单位Mbps
 @app.post("/report-bandwidth")
@@ -383,6 +387,7 @@ async def report_bandwidth(request: Request, data: dict):
 
     return {"message": f"节点 {node_name} 当前上传带宽更新成功", "now_bandwidth": now_bandwidth}
 
+
 @app.api_route("/{path:path}", methods=["GET", "HEAD"])
 async def gateway_handler(request: Request, path: str):
     required_params = ["X-Amz-Algorithm", "X-Amz-Credential",
@@ -404,6 +409,7 @@ async def gateway_handler(request: Request, path: str):
     redirect_url = resign_request(request)
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
+
 if __name__ == "__main__":
     import argparse
     import uvicorn
@@ -417,4 +423,4 @@ if __name__ == "__main__":
     load_config()
     # 移除原有的load_config调用，改为启动时根据参数调用
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run(app, host="0.0.0.0", port=args.port, access_log=False)
