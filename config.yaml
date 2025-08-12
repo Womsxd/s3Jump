@@ -1,0 +1,30 @@
+# 配置文件示例，包含所有需要的配置信息
+
+original_access_key: "your-original-access-key"
+original_secret_key: "your-original-secret-key"
+
+target_nodes:
+  node1:
+    enabled: true
+    access_key: "target-access-key-1"
+    secret_key: "target-secret-key-1"
+    endpoint: "lumine1"
+    region: "your-target-region-1"
+  node2:
+    enabled: true
+    access_key: "target-access-key-2"
+    secret_key: "target-secret-key-2"
+    endpoint: "lumine2"
+    region: "your-target-region-2"
+
+rules_use:
+  - rule_name
+
+rules:
+  rule_name:
+    logic: "and"
+    rules:
+      - "size <= 200KB"
+    use:
+      - node1 8
+      - node2 4
