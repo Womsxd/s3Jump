@@ -22,9 +22,12 @@ rules_use:
 
 rules:
   rule_name:
-    logic: "and"
+    mode: "and"
     rules:
+      # 文件大小 小于等于200KB
       - "size <= 200KB"
+      # 服务器当前使用带宽小于等于10
+      - "now_bandwidth <= 10"
     use:
       - node1 8
       - node2 4
