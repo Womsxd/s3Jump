@@ -166,6 +166,11 @@ def resign_request(request: Request) -> str:
             else:
                 file_size = None  # 未指定结束，忽略大小限制
 
+    # 传入带宽信息到规则上下文
+    with now_bandwidth_lock:
+        # 取当前请求path对应节点的带宽，默认0
+        node_bandwidth = now_bandwidths.get(selected_node.get("name", ""), 0)
+    
     # 构造上下文字典，方便扩展更多变量
     context = {
         "size": file_size,
@@ -173,18 +178,10 @@ def resign_request(request: Request) -> str:
         "path": request.url.path,
         "headers": dict(request.headers),
         "query_params": dict(request.query_params),
+        "node_bandwidth": node_bandwidth,
     }
 
-    # 传入带宽信息到规则上下文
-    with now_bandwidth_lock:
-        # 取当前请求path对应节点的带宽，默认0
-        node_bandwidth = now_bandwidths.get(selected_node.get("name", ""), 0)
-
-    # 构造上下文，加入now_bandwidth字段
-    context_with_bandwidth = dict(context) if context else {}
-    context_with_bandwidth["now_bandwidth"] = node_bandwidth
-
-    selected_node = select_node(context_with_bandwidth, config.rules, config.target_nodes)
+    selected_node = select_node(context, config.rules, config.target_nodes)
 
     if not selected_node:
         logging.error("未能选择到目标节点")
@@ -286,8 +283,6 @@ def load_config():
                     parts = expr.strip().split()
                     if parts:
                         allowed_names.add(parts[0])
-                # 允许带宽字段 now_bandwidth 参与规则表达式
-                allowed_names.add("now_bandwidth")
                 compiled_rule_funcs = [compile_rule_expr(expr, allowed_names) for expr in rules_exprs]
             except Exception as e:
                 logging.warning(f"规则表达式预编译失败，规则集 {rule_name}，错误: {e}")
