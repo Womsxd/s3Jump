@@ -105,21 +105,27 @@ def select_node(context: dict = None, rules: list = None, target_nodes: dict = N
             if context is None and rule_funcs:
                 continue
 
-            results = [rule(context if context is not None else {}) for rule in rule_funcs]
-            match = False
-            # rules为空时，视为匹配全部请求
-            if not rule_funcs:
-                match = True
-            else:
-                if mode == "and":
-                    match = all(results)
-                elif mode == "or":
-                    match = any(results)
-                elif mode == "not":
-                    match = not any(results)
-            if match:
-                for node, weight in node_weights.items():
-                    node_total_weights[node] = node_total_weights.get(node, 0) + weight
+            # 针对每个节点单独判断规则是否匹配
+            for node in node_weights.keys():
+                # 构造节点上下文，包含节点带宽等信息
+                node_context = context.copy() if context else {}
+                # 传入当前节点的带宽，字段名为 now_bandwidth，供规则表达式使用
+                bandwidths = context.get("bandwidths", {}) if context else {}
+                node_context["now_bandwidth"] = bandwidths.get(node, 0)
+
+                results = [rule(node_context) for rule in rule_funcs]
+                match = False
+                if not rule_funcs:
+                    match = True
+                else:
+                    if mode == "and":
+                        match = all(results)
+                    elif mode == "or":
+                        match = any(results)
+                    elif mode == "not":
+                        match = not any(results)
+                if match:
+                    node_total_weights[node] = node_total_weights.get(node, 0) + node_weights[node]
         except Exception as e:
             logging.warning(f"规则表达式解析失败，规则集 {rule_set.get('rule_name', '')}，错误: {e}")
 

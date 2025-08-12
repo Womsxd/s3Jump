@@ -166,19 +166,17 @@ def resign_request(request: Request) -> str:
             else:
                 file_size = None  # 未指定结束，忽略大小限制
 
-    # 传入带宽信息到规则上下文
-    with now_bandwidth_lock:
-        # 取当前请求path对应节点的带宽，默认0
-        node_bandwidth = now_bandwidths.get(selected_node.get("name", ""), 0)
-    
     # 构造上下文字典，方便扩展更多变量
+    with now_bandwidth_lock:
+        bandwidth_snapshot = now_bandwidths.copy()
+
     context = {
         "size": file_size,
         "method": request.method,
         "path": request.url.path,
         "headers": dict(request.headers),
         "query_params": dict(request.query_params),
-        "node_bandwidth": node_bandwidth,
+        "bandwidths": bandwidth_snapshot,  # 传入所有节点带宽信息
     }
 
     selected_node = select_node(context, config.rules, config.target_nodes)
